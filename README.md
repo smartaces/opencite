@@ -1,4 +1,5 @@
-![OpenCite reporting interface screenshot](./project_logo_opensite.png)
+![OpenCite logo](./project_logo_opensite_small.png)
+
 
 # Open Source AI Visibility For Everyone!
 
@@ -6,7 +7,10 @@ OpenCite makes LLM citations transparent. Anyone--content creators, researchers,
 
 Clone the repo, choose a workspace (locally or in Colab), and start recording the citation trails behind your own prompts. Every run is logged so you can diff, share, or question each source.
 
-![OpenCite reporting interface screenshot](./promptlevel2.png)
+## Try It Now!
+
+
+![OpenCite reporting screenshot](./promptlevel2.png)
 
 ## Map how LLMs surface knowledge
 
@@ -42,7 +46,7 @@ Export the entire dataset, the current filtered view, or highlight shortlists fo
 
 ## Built for the community
 
-* Works with OpenAI-compatible agent or custom search stack--drop in your client and reuse it across cells.
+* Works with any OpenAI-compatible agent or custom search stack--drop in your client and reuse it across cells.
 * Tables use column pickers, sticky headers, and text search so large datasets stay navigable.
 * Toggle between domain-only and page-level detail inside the prompt report to focus on today's questions.
 
