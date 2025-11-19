@@ -1,0 +1,2 @@
+# Search Mode 1: Ask a Single Question
+Use this mode for a quick, one-off search. It's the fastest way to ask a question and see the sources behind the answer. Simply type your query, choose your settings, and get an immediate report on the citations.

@@ -1,0 +1,2 @@
+# Step 8: Prepare the Tool that Logs Your Results
+To analyze your search results, you first need to record them. This cell gets the data logging tool ready. It will automatically save every search you run into organized data files (CSVs), which are used to build the final analysis reports.

@@ -1,0 +1,2 @@
+# Search Mode 2: Test How Often a Source is Cited
+Does the AI cite the same sources every time for the same question? This mode helps you find out. It runs the same prompt multiple times so you can see how much the results vary. This is great for understanding how stable or consistent a source's ranking is.

@@ -1,0 +1,2 @@
+# Analysis Step 1: Combine All Results for Reporting
+Now that you've run some searches, it's time to analyze the data. This cell gathers all of your saved search logs from the different run modes into a single "master" dataset. It also creates the interactive filters (like dropdowns and search bars) that you'll use in the reports below.
