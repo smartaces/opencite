@@ -7,7 +7,8 @@ OpenCite makes LLM citations transparent. Anyone--content creators, researchers,
 
 Clone the repo, choose a workspace (locally or in Colab), and start recording the citation trails behind your own prompts. Every run is logged so you can diff, share, or question each source.
 
-## Try It Now!
+## Try It Now in Colab: 
+https://github.com/smartaces/opencite/blob/main/opencite_starter_cookbook_colab.ipynb
 
 
 ![OpenCite reporting screenshot](./promptlevel2.png)
