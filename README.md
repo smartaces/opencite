@@ -1,4 +1,4 @@
-![OpenCite logo](./project_logo_opensite_small.png)
+![OpenCite logo](./images/project_logo_opensite_small.png)
 
 
 # Open Source AI Visibility For Everyone!
@@ -11,7 +11,7 @@ Clone the repo, choose a workspace (locally or in Colab), and start recording th
 https://github.com/smartaces/opencite/blob/main/opencite_starter_cookbook_colab.ipynb
 
 
-![OpenCite reporting screenshot](./promptlevel2.png)
+![OpenCite reporting screenshot](./images/promptlevel2.png)
 
 ## Map how LLMs surface knowledge
 
@@ -37,7 +37,7 @@ Keep citations open and auditable. ReportHelper logs every execution as raw JSON
 * Shared folders make it simple to diff, share, or sync with other tools.
 * Master dataset helpers dedupe runs, maintain manifests, and expose reusable filters.
 
-![Notebook workspace screenshot highlighting logging](./convo2.png)
+![Notebook workspace screenshot highlighting logging](./images/convo2.png)
 
 ## Understand what shows up for your topics
 
