@@ -1,0 +1,13 @@
+first time to create venv: python -m venv .venv
+
+execution policy:  Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process
+
+then
+
+.venv\Scripts\activate 
+
+for codex
+
+cd /mnt/c/Users/james/OneDrive/Documents/projects/opencite
+
+cd /mnt/c/Users/james/OneDrive/Documents/projects/opencite_website
