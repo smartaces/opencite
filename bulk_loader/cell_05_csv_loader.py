@@ -1,4 +1,12 @@
+# =============================================================================
+# CELL 05: CSV LOADER & PERSONA MAPPER
+# =============================================================================
+# Upload your prompt list, map the columns, and save a normalized file.
+# Auto-detects common column names for prompt, persona, runs, and turns.
+# =============================================================================
+
 import io
+import json
 import os
 import re
 from datetime import datetime
@@ -23,8 +31,6 @@ def _load_paths():
     return {k: Path(v) for k, v in config['paths'].items()}
 
 
-import json  # Placed after helper to avoid circular import linting complaints
-
 PATHS = _load_paths()
 TERMS_DIR = Path(PATHS['terms_lists'])
 TERMS_DIR.mkdir(parents=True, exist_ok=True)
@@ -41,8 +47,6 @@ persona_presets = [
 # ============================================================================
 # AUTO-DETECTION PATTERNS
 # ============================================================================
-# Each key maps to a list of regex patterns (case-insensitive) that indicate
-# a column is likely to contain that type of data.
 
 COLUMN_PATTERNS = {
     "prompt": [
@@ -86,10 +90,7 @@ COLUMN_PATTERNS = {
 
 
 def _detect_column(columns: list[str], field: str) -> str | None:
-    """
-    Attempt to find the best matching column for a given field type.
-    Returns the column name if found, None otherwise.
-    """
+    """Attempt to find the best matching column for a given field type."""
     patterns = COLUMN_PATTERNS.get(field, [])
     if not patterns:
         return None
@@ -103,10 +104,7 @@ def _detect_column(columns: list[str], field: str) -> str | None:
 
 
 def _auto_detect_columns(columns: list[str]) -> dict[str, str | None]:
-    """
-    Auto-detect likely columns for prompt, persona, runs, turns.
-    Returns a dict with field names as keys and detected column names (or None) as values.
-    """
+    """Auto-detect likely columns for prompt, persona, runs, turns."""
     return {
         "prompt": _detect_column(columns, "prompt"),
         "persona": _detect_column(columns, "persona"),
@@ -130,8 +128,8 @@ has_headers_checkbox = widgets.Checkbox(
     style=COLUMN_STYLE,
     layout=widgets.Layout(width="200px"),
 )
-preview_output = widgets.Output()
 detection_output = widgets.Output()
+preview_output = widgets.Output()
 
 prompt_dropdown = widgets.Dropdown(
     description="Prompt column:",
@@ -203,7 +201,7 @@ filename_input = widgets.Text(
     layout=COLUMN_LAYOUT,
     style=COLUMN_STYLE,
 )
-save_button = widgets.Button(description="💾 Save normalized CSV", button_style="success", disabled=True)
+save_button = widgets.Button(description="💾 Save Settings", button_style="success", disabled=True)
 status_output = widgets.Output()
 
 _state = {"df": None, "columns": []}
@@ -260,15 +258,17 @@ def _update_column_widgets(columns: list[str], detected: dict[str, str | None]):
 
 
 def _display_detection_summary(detected: dict[str, str | None]):
-    """Show what columns were auto-detected."""
+    """Show what columns were auto-detected using proper HTML rendering."""
     with detection_output:
         clear_output()
         found = {k: v for k, v in detected.items() if v is not None}
         if found:
-            summary = ", ".join([f"<b>{k}</b> → <code>{v}</code>" for k, v in found.items()])
-            print(f"🔍 Auto-detected: {summary}")
+            items = [f"<b>{k}</b> → {v}" for k, v in found.items()]
+            html = f"<div style='background:#e8f5e9; padding:8px 12px; border-radius:4px; margin:8px 0;'>✅ Auto-detected: {', '.join(items)}</div>"
+            display(widgets.HTML(html))
         else:
-            print("ℹ️ No columns auto-detected. Please map manually.")
+            html = "<div style='background:#fff3e0; padding:8px 12px; border-radius:4px; margin:8px 0;'>ℹ️ No columns auto-detected. Please map manually below.</div>"
+            display(widgets.HTML(html))
 
 
 def _handle_upload(change):
@@ -299,14 +299,19 @@ def _handle_upload(change):
 
     # Auto-detect columns
     detected = _auto_detect_columns(columns)
-    _update_column_widgets(columns, detected)
+    
+    # Display detection summary first
     _display_detection_summary(detected)
+    
+    # Update dropdowns with detected values
+    _update_column_widgets(columns, detected)
 
     save_button.disabled = False
 
+    # Show preview
     with preview_output:
         clear_output()
-        print(f"✅ Loaded CSV with {len(df)} rows and columns: {columns}\n")
+        display(widgets.HTML(f"<div style='margin-bottom:8px;'>📄 <b>{len(df)} rows</b> loaded with columns: <code>{', '.join(columns)}</code></div>"))
         display(df.head())
 
 
@@ -443,8 +448,7 @@ def _handle_save(_):
 
     with status_output:
         clear_output()
-        print(f"✅ Saved {len(normalized)} prompts to: {output_path}")
-        print("Columns: prompt, persona, runs, turns")
+        display(widgets.HTML(f"<div style='background:#e8f5e9; padding:8px 12px; border-radius:4px;'>✅ Saved <b>{len(normalized)} prompts</b> to:<br><code style='font-size:11px;'>{output_path}</code></div>"))
 
 
 upload_widget.observe(_handle_upload, names="value")
@@ -453,20 +457,25 @@ persona_dropdown.observe(_update_persona_dropdown, names="value")
 save_button.on_click(_handle_save)
 _update_persona_widgets()
 
+# ============================================================================
+# LAYOUT
+# ============================================================================
+
 form = widgets.VBox(
     [
-        widgets.HTML("<h3>Cell 12 · CSV Loader & Persona Mapper</h3><p>Upload your prompt list, map the columns, and save a normalized file inside <code>terms_lists/</code>.</p>"),
+        widgets.HTML("<h3>📄 CSV Loader & Persona Mapper</h3>"),
+        widgets.HTML("<p style='margin-bottom:12px;'>Upload your prompt list, map the columns, and save a normalized file to <code>terms_lists/</code>.</p>"),
         widgets.HBox([upload_widget, has_headers_checkbox], layout=widgets.Layout(width="100%", justify_content="flex-start", gap="10px")),
-        preview_output,
         detection_output,
-        widgets.HTML("<hr><b>Column Mapping</b> <small>(auto-detected where possible — change as needed)</small>"),
+        preview_output,
+        widgets.HTML("<hr style='margin:16px 0 12px 0;'><b>Column Mapping</b> <small style='color:#666;'>(auto-detected where possible)</small>"),
         prompt_dropdown,
         persona_mode,
         manual_persona_box,
         csv_persona_box,
         widgets.HBox([runs_column_dropdown, default_runs_input], layout=widgets.Layout(width="100%", justify_content="space-between", gap="12px")),
         widgets.HBox([turns_column_dropdown, default_turns_input], layout=widgets.Layout(width="100%", justify_content="space-between", gap="12px")),
-        widgets.HTML("<hr><b>Save Options</b>"),
+        widgets.HTML("<hr style='margin:16px 0 12px 0;'><b>Save Options</b>"),
         filename_input,
         save_button,
         status_output,

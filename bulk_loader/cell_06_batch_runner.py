@@ -1,5 +1,7 @@
 import json
 import os
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
@@ -83,6 +85,15 @@ def _convert_positive(value, fallback: int = 1) -> int:
     return max(1, number)
 
 
+def _format_duration(seconds: float) -> str:
+    """Format duration as human-readable string."""
+    if seconds < 60:
+        return f"{seconds:.0f}s"
+    minutes = int(seconds // 60)
+    secs = int(seconds % 60)
+    return f"{minutes}m {secs}s"
+
+
 def _simulate_persona_message(client, persona_profile: str, history: list, topic: str) -> str:
     """Simulate a persona follow-up message. Uses provided client for thread safety."""
     prompt = (
@@ -120,6 +131,51 @@ def _create_thread_local_agent():
     model = getattr(search_agent, "model", "gpt-5.2")
     client = search_agent.client  # Share the client (it's thread-safe)
     return OpenAISearchAgent(client, model=model)
+
+
+# ============================================================================
+# SPINNER CLASS
+# ============================================================================
+
+class Spinner:
+    """A simple spinner that runs in a background thread."""
+    
+    FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+    
+    def __init__(self, label_widget):
+        self._label = label_widget
+        self._running = False
+        self._thread = None
+        self._message = "Running..."
+        self._frame_idx = 0
+    
+    def start(self, message: str = "Running..."):
+        """Start the spinner with a message."""
+        self._message = message
+        self._running = True
+        self._frame_idx = 0
+        self._thread = threading.Thread(target=self._spin, daemon=True)
+        self._thread.start()
+    
+    def update(self, message: str):
+        """Update the spinner message."""
+        self._message = message
+    
+    def stop(self, final_message: str = None):
+        """Stop the spinner and optionally display a final message."""
+        self._running = False
+        if self._thread:
+            self._thread.join(timeout=1)
+        if final_message:
+            self._label.value = final_message
+    
+    def _spin(self):
+        """Background thread that updates the spinner."""
+        while self._running:
+            frame = self.FRAMES[self._frame_idx % len(self.FRAMES)]
+            self._label.value = f"{frame} {self._message}"
+            self._frame_idx += 1
+            time.sleep(0.1)
 
 
 # ============================================================================
@@ -255,7 +311,7 @@ preset_locations = {
 
 
 # ============================================================================
-# RUN BUTTON & OUTPUT
+# RUN BUTTON & OUTPUT WIDGETS
 # ============================================================================
 
 run_button = widgets.Button(
@@ -264,7 +320,27 @@ run_button = widgets.Button(
     icon="play",
     layout=widgets.Layout(width='120px'),
 )
-output = widgets.Output()
+
+# Spinner label (shows rotating icon + status)
+spinner_label = widgets.HTML(value="", layout=widgets.Layout(width='100%'))
+
+# Summary output (compact progress lines)
+summary_output = widgets.Output(layout=widgets.Layout(width='100%'))
+
+# Detail output (full output, scrollable, doesn't auto-scroll parent)
+detail_output = widgets.Output(layout=widgets.Layout(
+    width='100%',
+    max_height='400px',
+    overflow_y='auto',
+    border='1px solid #ccc',
+    padding='8px',
+))
+
+# Container for detail output with label
+detail_container = widgets.VBox([
+    widgets.HTML("<b>📋 Detailed Output</b> <span style='color: #666; font-size: 0.9em;'>(scroll to view)</span>"),
+    detail_output
+], layout=widgets.Layout(display='none'))  # Hidden until batch completes
 
 
 # ============================================================================
@@ -427,11 +503,18 @@ def _execute_single_run(
 
     model_name = getattr(local_agent, "model", "unknown")
     persona_model_name = PERSONA_MODEL
-    log_lines = []
+    detail_lines = []  # Full output for end dump
+    total_citations = 0
 
     reporter = ReportHelper("multi_turn_batch", PATHS, run_label=run_label)
     execution_id = reporter.execution_id
-    log_lines.append(f"\n▶ Run {run_idx}/{total_runs} — ID: {execution_id}")
+    
+    detail_lines.append(f"\n{'='*70}")
+    detail_lines.append(f"▶ Run {run_idx}/{total_runs} — ID: {execution_id}")
+    detail_lines.append(f"  Topic: {topic}")
+    if persona_profile:
+        detail_lines.append(f"  Persona: {persona_profile}")
+    detail_lines.append(f"{'='*70}")
 
     persona_history = []
     advisor_history = []
@@ -440,7 +523,9 @@ def _execute_single_run(
         turn_id = f"{execution_id}_turn_{turn}"
         if turn == 1:
             persona_msg = topic
-            log_lines.append(f"  Turn {turn}/{turns} — Initial: {persona_msg}")
+            detail_lines.append(f"\n── Turn {turn}/{turns} ──")
+            detail_lines.append(f"[Initial Query]")
+            detail_lines.append(f"{persona_msg}")
         else:
             persona_msg = _simulate_persona_message(
                 local_agent.client,
@@ -448,7 +533,10 @@ def _execute_single_run(
                 persona_history + advisor_history,
                 topic
             )
-            log_lines.append(f"  Turn {turn}/{turns} — Persona: {persona_msg}")
+            detail_lines.append(f"\n── Turn {turn}/{turns} ──")
+            detail_lines.append(f"[Persona Follow-up]")
+            detail_lines.append(f"{persona_msg}")
+            
         persona_history.append({"role": "user", "content": persona_msg})
 
         reporter.add_detail_row(
@@ -472,7 +560,7 @@ def _execute_single_run(
             persona_model=persona_model_name,
         )
 
-        log_lines.append(f"  Querying...")
+        detail_lines.append(f"\n[Querying AI...]")
         try:
             response = local_agent.search(
                 query=persona_msg,
@@ -480,27 +568,39 @@ def _execute_single_run(
                 reasoning_effort=reasoning_level,
                 verbosity="medium",
                 user_location=user_location,
-                use_previous_reasoning=True,  # Enable within this run's agent
+                use_previous_reasoning=True,
             )
         except Exception as exc:
-            log_lines.append(f"  ✗ Search failed: {exc}")
-            return {"success": False, "log": log_lines, "error": str(exc)}
+            detail_lines.append(f"[ERROR] Search failed: {exc}")
+            return {
+                "success": False, 
+                "detail_lines": detail_lines, 
+                "error": str(exc),
+                "total_citations": total_citations
+            }
 
         raw_path = reporter.save_raw_response(f"turn_{turn}", response)
         advisor_text = local_agent.extract_text_response(response)
         advisor_history.append({"role": "assistant", "content": advisor_text})
 
-        # Log response summary (truncated for readability)
-        response_preview = advisor_text[:200] + "..." if len(advisor_text) > 200 else advisor_text
-        log_lines.append(f"  Response: {response_preview}")
+        # Full response (NO TRUNCATION)
+        detail_lines.append(f"\n[AI Response]")
+        detail_lines.append(advisor_text)
 
         citations = local_agent.extract_citations(response)
+        turn_citations = len(citations) if citations else 0
+        total_citations += turn_citations
+        
         if citations:
-            log_lines.append(f"  Citations: {len(citations)} found")
+            detail_lines.append(f"\n[Citations: {turn_citations}]")
             for rank, cite in enumerate(citations, 1):
                 url = cite.get("url", "")
+                title = cite.get("title", "Untitled")
                 parsed = urlparse(url) if url else None
                 domain = parsed.netloc.replace("www.", "") if parsed and parsed.netloc else None
+                detail_lines.append(f"  {rank}. {title}")
+                detail_lines.append(f"     {url}")
+                
                 reporter.add_detail_row(
                     unit_id=turn_id,
                     turn_or_run=turn,
@@ -509,7 +609,7 @@ def _execute_single_run(
                     query_or_topic=topic,
                     message_text=advisor_text,
                     citation_rank=rank,
-                    citation_title=cite.get("title", ""),
+                    citation_title=title,
                     citation_url=url,
                     domain=domain,
                     context=context_level,
@@ -522,7 +622,7 @@ def _execute_single_run(
                     persona_model=persona_model_name,
                 )
         else:
-            log_lines.append(f"  Citations: none")
+            detail_lines.append(f"\n[No citations]")
             reporter.add_detail_row(
                 unit_id=turn_id,
                 turn_or_run=turn,
@@ -568,10 +668,18 @@ def _execute_single_run(
         summary_row[f"top_domain_{idx}_count"] = count
 
     summary_path = reporter.write_summary_csv(summary_row)
-    log_lines.append(f"  💾 Detail: {detail_path.name}")
-    log_lines.append(f"  💾 Summary: {summary_path.name}")
+    
+    detail_lines.append(f"\n{'─'*70}")
+    detail_lines.append(f"💾 Detail CSV: {detail_path.name}")
+    detail_lines.append(f"💾 Summary CSV: {summary_path.name}")
 
-    return {"success": True, "log": log_lines, "detail_path": detail_path, "summary_path": summary_path}
+    return {
+        "success": True, 
+        "detail_lines": detail_lines, 
+        "detail_path": detail_path, 
+        "summary_path": summary_path,
+        "total_citations": total_citations
+    }
 
 
 # ============================================================================
@@ -590,20 +698,34 @@ def _execute_runs_for_prompt(
     user_location: dict,
     run_label: str,
     max_workers: int,
+    spinner: Spinner,
 ) -> dict:
     """
     Execute all runs for a single prompt.
     If max_workers > 1, runs execute in parallel with thread-local agents.
     """
-    log_lines = []
-    log_lines.append(f"\n[{prompt_idx}/{total_prompts}] {topic[:50]}{'...' if len(topic) > 50 else ''}")
-    log_lines.append(f"    Persona: {persona_profile[:40] if persona_profile else '(none)'}{'...' if len(persona_profile) > 40 else ''}")
-    log_lines.append(f"    Runs: {runs} | Turns: {turns}")
+    all_detail_lines = []
+    total_citations = 0
+    prompt_start = time.time()
+    
+    # Update spinner with current prompt
+    topic_short = topic[:40] + "..." if len(topic) > 40 else topic
+    spinner.update(f"[{prompt_idx}/{total_prompts}] {topic_short}")
+    
+    # Header for detail output
+    all_detail_lines.append(f"\n{'#'*70}")
+    all_detail_lines.append(f"# PROMPT {prompt_idx}/{total_prompts}")
+    all_detail_lines.append(f"# {topic}")
+    if persona_profile:
+        all_detail_lines.append(f"# Persona: {persona_profile}")
+    all_detail_lines.append(f"# Runs: {runs} | Turns per run: {turns}")
+    all_detail_lines.append(f"{'#'*70}")
 
     if runs == 1 or max_workers == 1:
         # Sequential execution - use global agent
         successes = 0
         for run_idx in range(1, runs + 1):
+            spinner.update(f"[{prompt_idx}/{total_prompts}] Run {run_idx}/{runs}: {topic_short}")
             result = _execute_single_run(
                 run_idx=run_idx,
                 total_runs=runs,
@@ -614,15 +736,25 @@ def _execute_runs_for_prompt(
                 reasoning_level=reasoning_level,
                 user_location=user_location,
                 run_label=run_label,
-                use_local_agent=False,  # Use global agent
+                use_local_agent=False,
             )
-            log_lines.extend(result["log"])
+            all_detail_lines.extend(result.get("detail_lines", []))
+            total_citations += result.get("total_citations", 0)
             if result["success"]:
                 successes += 1
-        return {"success": successes == runs, "successes": successes, "total": runs, "log": log_lines}
+                
+        duration = time.time() - prompt_start
+        return {
+            "success": successes == runs, 
+            "successes": successes, 
+            "total": runs, 
+            "detail_lines": all_detail_lines,
+            "total_citations": total_citations,
+            "duration": duration
+        }
     else:
         # Parallel execution - each run gets its own agent
-        log_lines.append(f"    ⚡ Running {runs} runs in parallel (max {max_workers} workers)")
+        all_detail_lines.append(f"\n⚡ Running {runs} runs in parallel (max {max_workers} workers)")
         successes = 0
 
         with ThreadPoolExecutor(max_workers=min(max_workers, runs)) as executor:
@@ -639,7 +771,7 @@ def _execute_runs_for_prompt(
                     reasoning_level=reasoning_level,
                     user_location=user_location,
                     run_label=run_label,
-                    use_local_agent=True,  # Create fresh agent per thread
+                    use_local_agent=True,
                 )
                 futures[future] = run_idx
 
@@ -647,23 +779,39 @@ def _execute_runs_for_prompt(
                 run_idx = futures[future]
                 try:
                     result = future.result()
-                    log_lines.extend(result["log"])
+                    all_detail_lines.extend(result.get("detail_lines", []))
+                    total_citations += result.get("total_citations", 0)
                     if result["success"]:
                         successes += 1
                 except Exception as exc:
-                    log_lines.append(f"\n  ✗ Run {run_idx} failed with exception: {exc}")
+                    all_detail_lines.append(f"\n[ERROR] Run {run_idx} failed: {exc}")
 
-        return {"success": successes == runs, "successes": successes, "total": runs, "log": log_lines}
+        duration = time.time() - prompt_start
+        return {
+            "success": successes == runs, 
+            "successes": successes, 
+            "total": runs, 
+            "detail_lines": all_detail_lines,
+            "total_citations": total_citations,
+            "duration": duration
+        }
 
 
 def _run_batch(_):
     df = _ensure_dataframe()
     if df is None or df.empty:
-        with output:
+        with summary_output:
             clear_output()
             print("⚠ Load a CSV before running.")
         return
 
+    # Clear outputs and hide detail container
+    with summary_output:
+        clear_output()
+    with detail_output:
+        clear_output()
+    detail_container.layout.display = 'none'
+    
     total_rows = len(df)
     successful_prompts = 0
     skipped = []
@@ -672,64 +820,108 @@ def _run_batch(_):
     default_label = f"batch_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     run_label = user_label or default_label
     max_workers = parallel_dropdown.value
-
-    with output:
-        clear_output()
+    
+    # Collect all detail output
+    all_detail_output = []
+    
+    # Start spinner
+    spinner = Spinner(spinner_label)
+    spinner.start(f"Starting batch of {total_rows} prompts...")
+    
+    batch_start = time.time()
+    
+    # Print header to summary
+    with summary_output:
         print(f"🚀 Batch: {total_rows} prompts from {Path(csv_dropdown.value).name}")
         print(f"   Search: {context_dropdown.value} | Reasoning: {reasoning_dropdown.value}")
         if max_workers > 1:
             print(f"   ⚡ Parallel: up to {max_workers} runs simultaneously")
-        else:
-            print(f"   Sequential: 1 run at a time")
         if user_location:
             print(f"   📍 Location: {user_location['city']}, {user_location['country']}")
         print(f"   🏷️ Label: {run_label}")
-        print("=" * 60)
+        print("─" * 60)
 
-        for idx, row in df.iterrows():
-            topic = str(row.get("prompt", "") or "").strip()
-            if not topic:
-                skipped.append((idx + 1, "Missing prompt"))
-                continue
+    # Add header to detail output
+    all_detail_output.append(f"{'='*70}")
+    all_detail_output.append(f"BATCH RUN: {run_label}")
+    all_detail_output.append(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    all_detail_output.append(f"CSV: {Path(csv_dropdown.value).name}")
+    all_detail_output.append(f"Settings: Search={context_dropdown.value}, Reasoning={reasoning_dropdown.value}")
+    if user_location:
+        all_detail_output.append(f"Location: {user_location['city']}, {user_location['country']}")
+    all_detail_output.append(f"{'='*70}")
 
-            try:
-                persona_profile = _validate_persona_text(_coerce_persona(row.get("persona", "")))
-            except ValueError as exc:
-                skipped.append((idx + 1, str(exc)))
-                continue
+    for idx, row in df.iterrows():
+        topic = str(row.get("prompt", "") or "").strip()
+        if not topic:
+            skipped.append((idx + 1, "Missing prompt"))
+            with summary_output:
+                print(f"⚠ [{idx + 1}/{total_rows}] Skipped: missing prompt")
+            continue
 
-            turns = _convert_positive(row.get("turns"), fallback=1)
-            runs = _convert_positive(row.get("runs"), fallback=1)
+        try:
+            persona_profile = _validate_persona_text(_coerce_persona(row.get("persona", "")))
+        except ValueError as exc:
+            skipped.append((idx + 1, str(exc)))
+            with summary_output:
+                print(f"⚠ [{idx + 1}/{total_rows}] Skipped: {exc}")
+            continue
 
-            result = _execute_runs_for_prompt(
-                prompt_idx=idx + 1,
-                total_prompts=total_rows,
-                topic=topic,
-                persona_profile=persona_profile,
-                turns=turns,
-                runs=runs,
-                context_level=context_dropdown.value,
-                reasoning_level=reasoning_dropdown.value,
-                user_location=user_location,
-                run_label=run_label,
-                max_workers=max_workers,
-            )
+        turns = _convert_positive(row.get("turns"), fallback=1)
+        runs = _convert_positive(row.get("runs"), fallback=1)
 
-            # Print logs
-            for line in result["log"]:
-                print(line)
+        result = _execute_runs_for_prompt(
+            prompt_idx=idx + 1,
+            total_prompts=total_rows,
+            topic=topic,
+            persona_profile=persona_profile,
+            turns=turns,
+            runs=runs,
+            context_level=context_dropdown.value,
+            reasoning_level=reasoning_dropdown.value,
+            user_location=user_location,
+            run_label=run_label,
+            max_workers=max_workers,
+            spinner=spinner,
+        )
 
+        # Collect detail output
+        all_detail_output.extend(result.get("detail_lines", []))
+
+        # Print compact summary line
+        topic_short = topic[:40] + "..." if len(topic) > 40 else topic
+        duration_str = _format_duration(result.get("duration", 0))
+        citations = result.get("total_citations", 0)
+        
+        with summary_output:
             if result["success"]:
+                print(f"✓ [{idx + 1}/{total_rows}] \"{topic_short}\" — {runs} runs, {citations} citations, {duration_str}")
                 successful_prompts += 1
             else:
-                skipped.append((idx + 1, f"Partial failure: {result['successes']}/{result['total']} runs succeeded"))
+                print(f"⚠ [{idx + 1}/{total_rows}] \"{topic_short}\" — {result['successes']}/{result['total']} runs, {citations} citations")
+                skipped.append((idx + 1, f"Partial: {result['successes']}/{result['total']} runs"))
 
-        print("\n" + "=" * 60)
-        print(f"✓ Complete: {successful_prompts}/{total_rows} prompts fully successful")
+    # Stop spinner
+    batch_duration = time.time() - batch_start
+    spinner.stop(f"✅ Complete! {successful_prompts}/{total_rows} prompts in {_format_duration(batch_duration)}")
+
+    # Print final summary
+    with summary_output:
+        print("─" * 60)
+        print(f"✓ Finished: {successful_prompts}/{total_rows} prompts successful")
+        print(f"⏱️ Total time: {_format_duration(batch_duration)}")
         if skipped:
-            print(f"✗ Skipped/failed:")
+            print(f"\n⚠ Issues:")
             for row_num, reason in skipped:
                 print(f"   Row {row_num}: {reason}")
+
+    # Dump all detail output to detail container
+    with detail_output:
+        for line in all_detail_output:
+            print(line)
+    
+    # Show detail container
+    detail_container.layout.display = 'block'
 
 
 # ============================================================================
@@ -775,7 +967,7 @@ controls = widgets.VBox([
     widgets.HTML("<b>Parallel runs</b> — Run multiple queries simultaneously for faster processing"),
     parallel_dropdown,
 
-    widgets.HTML("<hr style='margin: 12px 0;'>"),
+    widgets.HTML("<hr style='margin: 8px 0;'>"),
     widgets.HTML("<b>Location bias</b> — Personalises results as if searching from this location"),
     location_toggle,
     location_presets,
@@ -783,7 +975,15 @@ controls = widgets.VBox([
 
     widgets.HTML("<hr style='margin: 12px 0;'>"),
     run_button,
-    output,
+    
+    # Spinner and summary (always visible during/after run)
+    widgets.HTML("<hr style='margin: 12px 0;'>"),
+    spinner_label,
+    summary_output,
+    
+    # Detail output (shown after completion, scrollable)
+    widgets.HTML("<br/>"),
+    detail_container,
 ])
 
 display(controls)
