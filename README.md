@@ -19,7 +19,7 @@ OpenCite Bulk Prompt Runner:
 
 Lets you bulk process prompts from CSVs with assigned user personas, and even multi-turn conversation with OpenAI models to track how citation use varies across personas, and extended conversations.
 
-https://github.com/smartaces/opencite/blob/main/OPENCITE_AI_Search_Visibility_Bulk_Prompt_Runner_colab.ipynb
+https://colab.research.google.com/github/smartaces/opencite/blob/main/OPENCITE_AI_Search_Visibility_Bulk_Prompt_Runner_colab.ipynb
 
 ![OpenCite reporting screenshot](./images/promptlevel2.png)
 
