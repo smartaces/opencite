@@ -9,7 +9,9 @@ Clone the repo, choose a workspace (locally or in Colab), and start recording th
 
 ## Connect With Me: 
 
-If you have questions about this project, or simply want to connect you can find me on LinkedIn here: https://www.linkedin.com/in/jamesbentleyai/
+If you have questions about this project, or simply want to connect you can find me on LinkedIn here: 
+
+https://www.linkedin.com/in/jamesbentleyai/
 
 ## Try It Now in Colab: 
 
