@@ -7,13 +7,19 @@ OpenCite makes LLM citations transparent. Anyone--content creators, researchers,
 
 Clone the repo, choose a workspace (locally or in Colab), and start recording the citation trails behind your own prompts. Every run is logged so you can diff, share, or question each source.
 
+## Connect With Me: 
+
+If you have questions about this project, or simply want to connect you can find me on LinkedIn here: 
+
+https://www.linkedin.com/in/jamesbentleyai/
+
 ## Try It Now in Colab: 
 
 OpenCite Bulk Prompt Runner:
 
 Lets you bulk process prompts from CSVs with assigned user personas, and even multi-turn conversation with OpenAI models to track how citation use varies across personas, and extended conversations.
 
-https://github.com/smartaces/opencite/blob/main/OPENCITE_AI_Search_Visibility_Bulk_Prompt_Runner_colab.ipynb
+https://colab.research.google.com/github/smartaces/opencite/blob/main/OPENCITE_AI_Search_Visibility_Bulk_Prompt_Runner_colab.ipynb
 
 ![OpenCite reporting screenshot](./images/promptlevel2.png)
 
