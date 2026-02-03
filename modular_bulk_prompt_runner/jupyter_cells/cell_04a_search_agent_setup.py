@@ -58,11 +58,11 @@ def get_api_key(api_key_name: str) -> str:
         from google.colab import userdata
         # Map environment variable name to Colab secret name
         secret_map = {
-            "OPENAI_API_KEY": "openai_API",
-            "ANTHROPIC_API_KEY": "anthropic_API",
-            "PERPLEXITY_API_KEY": "perplexity_API",
-            "GOOGLE_API_KEY": "google_API",
-            "XAI_API_KEY": "xai_API",
+            "OPENAI_API_KEY": "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY": "ANTHROPIC_API_KEY",
+            "PERPLEXITY_API_KEY": "PERPLEXITY_API_KEY",
+            "GOOGLE_API_KEY": "GEMINI_API_KEY",
+            "XAI_API_KEY": "XAI_API_KEY",
         }
         secret_name = secret_map.get(api_key_name, api_key_name)
         key = userdata.get(secret_name)
@@ -162,6 +162,3 @@ search_selector = ProviderModelSelector(
 )
 
 search_selector.display()
-
-print("\nSelect a provider and model, then click 'Confirm Selection'.")
-print("The search agent will be used for web search queries with citation extraction.")

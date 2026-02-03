@@ -35,9 +35,9 @@ def _load_paths():
 
 
 # GitHub repository configuration
-GITHUB_REPO = "your-username/opencite-modular"  # Update with actual repo
+GITHUB_REPO = "smartaces/opencite"
 GITHUB_BRANCH = "main"
-GITHUB_BASE_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}"
+GITHUB_BASE_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/modular_bulk_prompt_runner/github_scripts"
 
 # Files to download - organized by subdirectory
 SCRIPT_FILES = {
@@ -51,10 +51,12 @@ SCRIPT_FILES = {
     "schemas": [
         "__init__.py",
         "openai_models.py",
+        "google_models.py",
     ],
     "providers": [
         "__init__.py",
         "openai_cartridge.py",
+        "google_cartridge.py",
     ],
     "ui": [
         "__init__.py",
@@ -104,7 +106,7 @@ def download_scripts(paths: dict, status_output: widgets.Output, force: bool = F
                     continue
 
                 # Build URL and download
-                url = f"{GITHUB_BASE_URL}/github_scripts/{subdir}/{filename}"
+                url = f"{GITHUB_BASE_URL}/{subdir}/{filename}"
 
                 try:
                     with urlopen(url, timeout=30) as response:

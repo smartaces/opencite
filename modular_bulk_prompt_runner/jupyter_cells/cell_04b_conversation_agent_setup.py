@@ -52,11 +52,11 @@ if 'get_api_key' not in globals():
         try:
             from google.colab import userdata
             secret_map = {
-                "OPENAI_API_KEY": "openai_API",
-                "ANTHROPIC_API_KEY": "anthropic_API",
-                "PERPLEXITY_API_KEY": "perplexity_API",
-                "GOOGLE_API_KEY": "google_API",
-                "XAI_API_KEY": "xai_API",
+                "OPENAI_API_KEY": "OPENAI_API_KEY",
+                "ANTHROPIC_API_KEY": "ANTHROPIC_API_KEY",
+                "PERPLEXITY_API_KEY": "PERPLEXITY_API_KEY",
+                "GOOGLE_API_KEY": "GEMINI_API_KEY",
+                "XAI_API_KEY": "XAI_API_KEY",
             }
             secret_name = secret_map.get(api_key_name, api_key_name)
             key = userdata.get(secret_name)
@@ -206,7 +206,3 @@ conversation_selector = ProviderModelSelector(
 )
 
 conversation_selector.display()
-
-print("\nThis step is OPTIONAL for single-turn queries.")
-print("For multi-turn conversations, select a model and click 'Confirm Selection'.")
-print("Tip: Use a smaller/faster model here to reduce costs (e.g., GPT-5-mini).")

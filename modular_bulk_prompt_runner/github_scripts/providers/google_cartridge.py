@@ -36,7 +36,7 @@ class GoogleCartridge(BaseCartridge):
     name = "Google"
     description = "Google Gemini models with Google Search grounding"
     api_key_name = "GOOGLE_API_KEY"
-    api_key_secret_name = "Google_Gemini_API"
+    api_key_secret_name = "GEMINI_API_KEY"
     models = GOOGLE_MODELS
 
     def create_client(self, api_key: str) -> Any:
