@@ -181,6 +181,18 @@ class ProviderModelSelector:
             layout=widgets.Layout(width='200px', display='none'),
         )
 
+        # Google URL resolution checkbox
+        self.resolve_urls_checkbox = widgets.Checkbox(
+            value=False,
+            description="Resolve redirect URLs",
+            style={'description_width': 'initial'},
+            layout=widgets.Layout(width='200px', display='none'),
+        )
+        self.resolve_urls_label = widgets.HTML(
+            value="<small style='color: #666;'>Resolves Google's redirect URLs to actual page URLs (slower, adds ~3-5s per citation)</small>",
+            layout=widgets.Layout(display='none'),
+        )
+
         # Location controls
         self.location_checkbox = widgets.Checkbox(
             value=False,
@@ -217,6 +229,15 @@ class ProviderModelSelector:
             layout=widgets.Layout(display='none'),
         )
 
+        # Google-specific options container
+        self.google_options_container = widgets.VBox(
+            [
+                self.resolve_urls_checkbox,
+                self.resolve_urls_label,
+            ],
+            layout=widgets.Layout(display='none'),
+        )
+
         # Confirm button
         self.confirm_button = widgets.Button(
             description="Confirm Selection",
@@ -236,6 +257,12 @@ class ProviderModelSelector:
 
         # Initialize with default provider
         self._load_provider(self.default_provider)
+
+        # Show Google options if default provider is Google
+        if self.default_provider == 'google':
+            self.google_options_container.layout.display = 'flex'
+            self.resolve_urls_checkbox.layout.display = 'flex'
+            self.resolve_urls_label.layout.display = 'flex'
 
     def _load_provider(self, provider_key: str):
         """Load a provider's cartridge and populate model dropdown."""
@@ -271,7 +298,19 @@ class ProviderModelSelector:
 
     def _on_provider_change(self, change):
         """Handle provider dropdown change."""
-        self._load_provider(change['new'])
+        provider_key = change['new']
+        self._load_provider(provider_key)
+
+        # Show/hide Google-specific options
+        if provider_key == 'google':
+            self.google_options_container.layout.display = 'flex'
+            self.resolve_urls_checkbox.layout.display = 'flex'
+            self.resolve_urls_label.layout.display = 'flex'
+        else:
+            self.google_options_container.layout.display = 'none'
+            self.resolve_urls_checkbox.layout.display = 'none'
+            self.resolve_urls_label.layout.display = 'none'
+            self.resolve_urls_checkbox.value = False
 
     def _on_model_change(self, change):
         """Handle model dropdown change - update parameter controls."""
@@ -372,6 +411,10 @@ class ProviderModelSelector:
                     'region': self.location_region.value,
                 }
 
+            # Google-specific: URL resolution
+            if self.resolve_urls_checkbox.value:
+                params['resolve_redirects'] = True
+
             # Success message
             print(f"Selected: {self.current_cartridge.name} / {model_id}")
             print(f"Client initialized")
@@ -409,6 +452,7 @@ class ProviderModelSelector:
             provider_model_row,
             params_row,
             self.location_container,
+            self.google_options_container,
             self.confirm_button,
             self.status_output,
         ])
@@ -437,6 +481,8 @@ class ProviderModelSelector:
                 'city': self.location_city.value,
                 'region': self.location_region.value,
             }
+        if self.resolve_urls_checkbox.value:
+            params['resolve_redirects'] = True
 
         return {
             'cartridge': self.current_cartridge,

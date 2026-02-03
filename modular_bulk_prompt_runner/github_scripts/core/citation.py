@@ -18,20 +18,44 @@ class Citation:
     Represents a single URL citation extracted from an AI response.
     All provider cartridges must convert their native citation format
     to this standardized structure.
+
+    For Google Gemini, additional fields track the redirect URL resolution:
+    - redirect_url: Original Vertex redirect URL (Google only)
+    - google_domain: Domain from Google's title field (fallback)
+    - resolution_status: Status of URL resolution attempt
+    - resolution_note: Additional info about resolution (e.g., error message)
     """
     url: str
     title: str
     snippet: Optional[str] = None
     position: Optional[int] = None  # Position/rank in the response (1-indexed)
+    domain: Optional[str] = None  # Extracted domain from URL
+
+    # Google-specific fields for URL resolution
+    redirect_url: Optional[str] = None  # Original Vertex redirect URL
+    google_domain: Optional[str] = None  # Domain from Google's title field (fallback)
+    resolution_status: Optional[str] = None  # success/timeout/blocked/expired/failed
+    resolution_note: Optional[str] = None  # Additional resolution info
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for CSV/JSON output."""
-        return {
+        result = {
             'url': self.url,
             'title': self.title,
             'snippet': self.snippet,
             'position': self.position,
+            'domain': self.domain,
         }
+        # Include Google-specific fields if present
+        if self.redirect_url is not None:
+            result['redirect_url'] = self.redirect_url
+        if self.google_domain is not None:
+            result['google_domain'] = self.google_domain
+        if self.resolution_status is not None:
+            result['resolution_status'] = self.resolution_status
+        if self.resolution_note is not None:
+            result['resolution_note'] = self.resolution_note
+        return result
 
 
 @dataclass

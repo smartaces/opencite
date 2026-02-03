@@ -6,6 +6,9 @@ Uses the generateContent API with Google Search grounding.
 Supports thinking configuration for Gemini 3 (thinkingLevel) and
 Gemini 2.5 (thinkingBudget) models.
 
+Includes URL resolution for converting Vertex redirect URLs to actual
+destination URLs with progressive retry backoff.
+
 SDK: google-genai>=1.0.0
 Docs: https://ai.google.dev/gemini-api/docs/google-search
 """
@@ -13,7 +16,10 @@ Docs: https://ai.google.dev/gemini-api/docs/google-search
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, List, Optional
+import random
+import time
+from urllib.parse import urlparse
+from typing import Any, Dict, List, Optional, Tuple
 
 from core.base_cartridge import BaseCartridge
 from core.citation import Citation, SearchResponse, ChatResponse, ModelSchema
@@ -69,6 +75,7 @@ class GoogleCartridge(BaseCartridge):
         reasoning_effort: Optional[str] = None,
         search_context_size: Optional[str] = None,  # Not supported by Gemini
         previous_response_id: Optional[str] = None,  # Not used (stateless API)
+        resolve_redirects: bool = False,
         **kwargs
     ) -> SearchResponse:
         """Execute search with Google Search grounding.
@@ -81,6 +88,7 @@ class GoogleCartridge(BaseCartridge):
             reasoning_effort: Thinking level/budget setting
             search_context_size: Not supported (ignored)
             previous_response_id: Not used in generateContent API
+            resolve_redirects: If True, resolve Vertex redirect URLs to actual destinations
 
         Returns:
             SearchResponse with text, citations, and raw response
@@ -132,10 +140,16 @@ class GoogleCartridge(BaseCartridge):
             if parts:
                 text = parts[0].text if hasattr(parts[0], 'text') else ""
 
-        # Extract citations and return
+        # Extract citations
+        citations = self.extract_citations(response)
+
+        # Optionally resolve redirect URLs to actual destinations
+        if resolve_redirects and citations:
+            citations = self.resolve_citations(citations)
+
         return SearchResponse(
             text=text,
-            citations=self.extract_citations(response),
+            citations=citations,
             raw_response=response,
             model=model_id,
             provider=self.name,
@@ -211,11 +225,15 @@ class GoogleCartridge(BaseCartridge):
         Citations are extracted from:
         response.candidates[0].grounding_metadata.grounding_chunks[].web
 
+        For Google responses:
+        - uri contains a Vertex redirect URL
+        - title contains just the domain (e.g., "techradar.com")
+
         Args:
             raw_response: Raw Gemini API response
 
         Returns:
-            List of Citation objects
+            List of Citation objects with Google-specific fields populated
         """
         citations = []
 
@@ -235,16 +253,175 @@ class GoogleCartridge(BaseCartridge):
         for idx, chunk in enumerate(chunks):
             web = getattr(chunk, 'web', None)
             if web:
-                url = getattr(web, 'uri', '') or ''
-                title = getattr(web, 'title', '') or 'Untitled'
+                redirect_url = getattr(web, 'uri', '') or ''
+                google_domain = getattr(web, 'title', '') or 'Unknown'
 
                 citations.append(Citation(
-                    url=url,
-                    title=title,
+                    url=redirect_url,  # Initially set to redirect URL
+                    title=google_domain,  # Google only provides domain as title
                     position=idx + 1,
+                    domain=google_domain,  # Use Google's domain initially
+                    redirect_url=redirect_url,  # Store original redirect URL
+                    google_domain=google_domain,  # Store Google's domain as fallback
+                    resolution_status='pending',  # Will be updated if resolution runs
                 ))
 
         return citations
+
+    def resolve_citations(
+        self,
+        citations: List[Citation],
+        max_attempts: int = 4,
+        base_delay_range: Tuple[float, float] = (3.0, 5.0),
+        increment_range: Tuple[float, float] = (3.0, 5.0),
+        request_timeout: float = 5.0,
+    ) -> List[Citation]:
+        """Resolve redirect URLs in citations to actual destination URLs.
+
+        Uses progressive backoff with randomized delays between attempts.
+        Falls back to Google's domain if resolution fails after max attempts.
+
+        Args:
+            citations: List of Citation objects with redirect URLs
+            max_attempts: Maximum retry attempts per URL (default: 4)
+            base_delay_range: (min, max) seconds for base delay
+            increment_range: (min, max) seconds to add per retry
+            request_timeout: Timeout for each HEAD request in seconds
+
+        Returns:
+            List of Citation objects with resolved URLs (or fallbacks)
+        """
+        resolved_citations = []
+
+        for i, citation in enumerate(citations):
+            # Skip if no redirect URL to resolve
+            if not citation.redirect_url:
+                resolved_citations.append(citation)
+                continue
+
+            # Attempt to resolve the redirect URL
+            resolved_url, status, note = self._resolve_single_url(
+                citation.redirect_url,
+                max_attempts=max_attempts,
+                base_delay_range=base_delay_range,
+                increment_range=increment_range,
+                request_timeout=request_timeout,
+            )
+
+            if resolved_url:
+                # Success: extract domain from resolved URL
+                domain = self._extract_domain(resolved_url)
+                citation.url = resolved_url
+                citation.domain = domain
+                citation.title = domain  # Update title to match OpenAI behavior
+                citation.resolution_status = status
+            else:
+                # Failure: fall back to Google's domain
+                citation.url = None  # No actual URL available
+                citation.domain = citation.google_domain  # Use fallback
+                citation.resolution_status = status
+                citation.resolution_note = note or "webpage data not available"
+
+            resolved_citations.append(citation)
+
+            # Delay between citations (not after the last one)
+            if i < len(citations) - 1:
+                delay = random.uniform(*base_delay_range)
+                time.sleep(delay)
+
+        return resolved_citations
+
+    def _resolve_single_url(
+        self,
+        redirect_url: str,
+        max_attempts: int,
+        base_delay_range: Tuple[float, float],
+        increment_range: Tuple[float, float],
+        request_timeout: float,
+    ) -> Tuple[Optional[str], str, Optional[str]]:
+        """Resolve a single redirect URL with progressive retry backoff.
+
+        Args:
+            redirect_url: The Vertex redirect URL to resolve
+            max_attempts: Maximum number of attempts
+            base_delay_range: (min, max) for base delay
+            increment_range: (min, max) for delay increment
+            request_timeout: Timeout per request
+
+        Returns:
+            Tuple of (resolved_url or None, status, note)
+        """
+        try:
+            import requests
+        except ImportError:
+            return None, "error", "requests library not installed"
+
+        base_delay = random.uniform(*base_delay_range)
+        increment = random.uniform(*increment_range)
+
+        last_error = None
+
+        for attempt in range(max_attempts):
+            try:
+                response = requests.head(
+                    redirect_url,
+                    allow_redirects=True,
+                    timeout=request_timeout,
+                )
+
+                # Success
+                if response.status_code == 200:
+                    return response.url, "success", None
+
+                # Handle specific status codes
+                if response.status_code == 404:
+                    return None, "expired", f"URL returned 404"
+
+                if response.status_code in (403, 429):
+                    last_error = f"HTTP {response.status_code}"
+                    # Will retry with backoff
+                else:
+                    last_error = f"HTTP {response.status_code}"
+
+            except requests.exceptions.Timeout:
+                last_error = "timeout"
+            except requests.exceptions.ConnectionError:
+                last_error = "connection error"
+            except requests.exceptions.TooManyRedirects:
+                last_error = "too many redirects"
+            except requests.exceptions.RequestException as e:
+                last_error = str(e)
+
+            # If not the last attempt, wait with progressive backoff
+            if attempt < max_attempts - 1:
+                # Progressive delay: base + (attempt * increment) with randomization
+                delay = base_delay + (attempt * increment)
+                # Add slight randomization to the calculated delay
+                delay = delay + random.uniform(-0.5, 0.5)
+                delay = max(0.5, delay)  # Ensure minimum delay
+                time.sleep(delay)
+
+        # All attempts failed
+        return None, "failed", last_error
+
+    def _extract_domain(self, url: str) -> str:
+        """Extract domain from a URL.
+
+        Args:
+            url: Full URL
+
+        Returns:
+            Domain string (e.g., "techradar.com")
+        """
+        try:
+            parsed = urlparse(url)
+            domain = parsed.netloc
+            # Remove www. prefix if present
+            if domain.startswith('www.'):
+                domain = domain[4:]
+            return domain or "unknown"
+        except Exception:
+            return "unknown"
 
     def _build_thinking_config(
         self,
