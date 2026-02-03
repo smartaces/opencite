@@ -2,18 +2,17 @@
 """
 Download Scripts - Fetch the latest modular scripts from GitHub.
 
-This cell downloads the modular provider cartridges, schemas, and UI components
-to your workspace's scripts/modular folder.
+This cell downloads ALL modular provider cartridges, schemas, and UI components
+from the GitHub repository to your workspace's scripts folder.
 
-Scripts are downloaded to: {workspace}/scripts/modular/
-This is separate from the bulk_loader scripts folder to avoid conflicts.
+Scripts are downloaded dynamically - no hardcoded file list.
 """
 
 import json
 import os
 import sys
 from pathlib import Path
-from urllib.request import urlopen
+from urllib.request import urlopen, Request
 from urllib.error import URLError
 
 import ipywidgets as widgets
@@ -37,40 +36,47 @@ def _load_paths():
 # GitHub repository configuration
 GITHUB_REPO = "smartaces/opencite"
 GITHUB_BRANCH = "main"
-GITHUB_BASE_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/modular_bulk_prompt_runner/github_scripts"
+GITHUB_API_BASE = f"https://api.github.com/repos/{GITHUB_REPO}/contents"
+GITHUB_RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}"
+SCRIPTS_PATH = "modular_bulk_prompt_runner/github_scripts"
 
-# Files to download - organized by subdirectory
-SCRIPT_FILES = {
-    "core": [
-        "__init__.py",
-        "citation.py",
-        "base_cartridge.py",
-        "report_helper.py",
-        "batch_runner.py",
-        "google_url_resolver.py",
-    ],
-    "schemas": [
-        "__init__.py",
-        "openai_models.py",
-        "google_models.py",
-    ],
-    "providers": [
-        "__init__.py",
-        "openai_cartridge.py",
-        "google_cartridge.py",
-    ],
-    "ui": [
-        "__init__.py",
-        "provider_selector.py",
-    ],
-    "reports": [
-        "__init__.py",
-    ],
-}
+# Subdirectories to download
+SCRIPT_SUBDIRS = ["core", "schemas", "providers", "ui", "reports"]
+
+
+def get_github_files(subdir: str) -> list:
+    """Fetch list of files in a GitHub directory using the API.
+
+    Args:
+        subdir: Subdirectory name (e.g., "core", "providers")
+
+    Returns:
+        List of filenames in that directory
+    """
+    api_url = f"{GITHUB_API_BASE}/{SCRIPTS_PATH}/{subdir}?ref={GITHUB_BRANCH}"
+
+    try:
+        request = Request(api_url)
+        request.add_header('Accept', 'application/vnd.github.v3+json')
+        request.add_header('User-Agent', 'OpenCite-Downloader')
+
+        with urlopen(request, timeout=30) as response:
+            data = json.loads(response.read().decode('utf-8'))
+
+        # Filter for .py files only
+        files = [item['name'] for item in data if item['type'] == 'file' and item['name'].endswith('.py')]
+        return files
+
+    except URLError as e:
+        print(f"  Warning: Could not list {subdir}/ via API: {e}")
+        return []
+    except json.JSONDecodeError:
+        print(f"  Warning: Invalid response for {subdir}/")
+        return []
 
 
 def download_scripts(paths: dict, status_output: widgets.Output, force: bool = False) -> bool:
-    """Download all modular scripts from GitHub.
+    """Download all modular scripts from GitHub dynamically.
 
     Args:
         paths: PATHS dict with 'scripts' key
@@ -89,13 +95,22 @@ def download_scripts(paths: dict, status_output: widgets.Output, force: bool = F
 
     with status_output:
         clear_output()
-        print(f"Downloading modular scripts to: {scripts_dir}\n")
+        print(f"Downloading modular scripts to: {scripts_dir}")
+        print(f"Repository: {GITHUB_REPO} (branch: {GITHUB_BRANCH})")
+        print(f"\nFetching file lists from GitHub API...\n")
 
-        for subdir, files in SCRIPT_FILES.items():
+        for subdir in SCRIPT_SUBDIRS:
             subdir_path = scripts_dir / subdir
             subdir_path.mkdir(parents=True, exist_ok=True)
 
-            print(f"\n{subdir}/")
+            # Get list of files from GitHub API
+            files = get_github_files(subdir)
+
+            if not files:
+                print(f"\n{subdir}/ (no files found or API error)")
+                continue
+
+            print(f"\n{subdir}/ ({len(files)} files)")
 
             for filename in files:
                 file_path = subdir_path / filename
@@ -107,7 +122,7 @@ def download_scripts(paths: dict, status_output: widgets.Output, force: bool = F
                     continue
 
                 # Build URL and download
-                url = f"{GITHUB_BASE_URL}/{subdir}/{filename}"
+                url = f"{GITHUB_RAW_BASE}/{SCRIPTS_PATH}/{subdir}/{filename}"
 
                 try:
                     with urlopen(url, timeout=30) as response:
@@ -130,7 +145,7 @@ def download_scripts(paths: dict, status_output: widgets.Output, force: bool = F
         print(f"Failed: {fail_count}")
 
         if fail_count > 0:
-            print(f"\nSome downloads failed. Check the repository URL and try again.")
+            print(f"\nSome downloads failed. Check your internet connection and try again.")
             return False
 
         # Add scripts directory to Python path
@@ -164,7 +179,7 @@ def copy_local_scripts(paths: dict, source_dir: Path, status_output: widgets.Out
         print(f"To: {scripts_dir}\n")
 
         try:
-            for subdir in SCRIPT_FILES.keys():
+            for subdir in SCRIPT_SUBDIRS:
                 src = source_dir / subdir
                 dst = scripts_dir / subdir
 
@@ -172,7 +187,8 @@ def copy_local_scripts(paths: dict, source_dir: Path, status_output: widgets.Out
                     if dst.exists():
                         shutil.rmtree(dst)
                     shutil.copytree(src, dst)
-                    print(f"  [ok] {subdir}/")
+                    file_count = len(list(dst.glob("*.py")))
+                    print(f"  [ok] {subdir}/ ({file_count} files)")
                 else:
                     print(f"  [skip] {subdir}/ (not found in source)")
 
@@ -257,6 +273,7 @@ if PATHS:
     form = widgets.VBox([
         widgets.HTML("<h3>Download Modular Scripts</h3>"),
         widgets.HTML(f"<p>Scripts will be saved to: <code>{PATHS['scripts']}</code></p>"),
+        widgets.HTML(f"<p style='color: #666;'>Repository: {GITHUB_REPO} (fetches all .py files dynamically)</p>"),
         widgets.HTML("<hr style='margin: 12px 0;'>"),
         widgets.HTML("<b>Option 1: Download from GitHub</b>"),
         widgets.HBox([download_button, force_checkbox], layout=widgets.Layout(gap='12px')),
