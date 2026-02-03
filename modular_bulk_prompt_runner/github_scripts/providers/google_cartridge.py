@@ -369,19 +369,22 @@ class GoogleCartridge(BaseCartridge):
                     timeout=request_timeout,
                 )
 
-                # Success
-                if response.status_code == 200:
-                    return response.url, "success", None
+                # Check if we got redirected to a real URL (not still on vertex)
+                final_url = response.url
+                is_resolved = not final_url.startswith("https://vertexaisearch.cloud.google.com/")
 
-                # Handle specific status codes
+                # Success - we have a resolved URL (regardless of status code)
+                # Sites may return 403 for HEAD requests but we still got the real URL
+                if is_resolved:
+                    status = "success" if response.status_code == 200 else f"resolved_http_{response.status_code}"
+                    return final_url, status, None
+
+                # 404 on the redirect URL itself means expired
                 if response.status_code == 404:
-                    return None, "expired", f"URL returned 404"
+                    return None, "expired", "URL returned 404"
 
-                if response.status_code in (403, 429):
-                    last_error = f"HTTP {response.status_code}"
-                    # Will retry with backoff
-                else:
-                    last_error = f"HTTP {response.status_code}"
+                # Still on vertex URL - retry
+                last_error = f"HTTP {response.status_code}"
 
             except requests.exceptions.Timeout:
                 last_error = "timeout"
