@@ -16,6 +16,7 @@ from .citation import (
 from .base_cartridge import BaseCartridge
 from .report_helper import ReportHelper
 from .batch_runner import BatchRunner
+from .google_url_resolver import GoogleURLResolver, resolve_google_urls
 
 __all__ = [
     'Citation',
@@ -25,4 +26,6 @@ __all__ = [
     'BaseCartridge',
     'ReportHelper',
     'BatchRunner',
+    'GoogleURLResolver',
+    'resolve_google_urls',
 ]

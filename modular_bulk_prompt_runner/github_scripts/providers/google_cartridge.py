@@ -75,7 +75,6 @@ class GoogleCartridge(BaseCartridge):
         reasoning_effort: Optional[str] = None,
         search_context_size: Optional[str] = None,  # Not supported by Gemini
         previous_response_id: Optional[str] = None,  # Not used (stateless API)
-        resolve_redirects: bool = False,
         **kwargs
     ) -> SearchResponse:
         """Execute search with Google Search grounding.
@@ -88,10 +87,13 @@ class GoogleCartridge(BaseCartridge):
             reasoning_effort: Thinking level/budget setting
             search_context_size: Not supported (ignored)
             previous_response_id: Not used in generateContent API
-            resolve_redirects: If True, resolve Vertex redirect URLs to actual destinations
 
         Returns:
             SearchResponse with text, citations, and raw response
+
+        Note:
+            Citations contain Vertex redirect URLs. Use GoogleURLResolver
+            as a post-processing step to resolve these to actual page URLs.
         """
         from google.genai import types
 
@@ -140,12 +142,8 @@ class GoogleCartridge(BaseCartridge):
             if parts:
                 text = parts[0].text if hasattr(parts[0], 'text') else ""
 
-        # Extract citations
+        # Extract citations (with Vertex redirect URLs)
         citations = self.extract_citations(response)
-
-        # Optionally resolve redirect URLs to actual destinations
-        if resolve_redirects and citations:
-            citations = self.resolve_citations(citations)
 
         return SearchResponse(
             text=text,

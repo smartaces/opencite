@@ -47,6 +47,7 @@ SCRIPT_FILES = {
         "base_cartridge.py",
         "report_helper.py",
         "batch_runner.py",
+        "google_url_resolver.py",
     ],
     "schemas": [
         "__init__.py",
