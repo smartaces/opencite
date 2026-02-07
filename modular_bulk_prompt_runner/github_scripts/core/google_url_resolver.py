@@ -155,6 +155,116 @@ class GoogleURLResolver:
 
         return output_path
 
+    def resolve_csv_in_place(
+        self,
+        csv_path: str | Path,
+        url_column: str = "citation_url",
+        domain_column: str = "domain",
+        backup_suffix: str = "_vertex_backup",
+    ) -> Optional[Path]:
+        """Resolve Vertex URLs in a detail CSV, updating it in place.
+
+        Unlike resolve_batch_output(), this method:
+        - Overwrites the original file (no _resolved suffix)
+        - Updates BOTH citation_url AND domain columns
+        - Does NOT add extra columns (resolved_url, resolved_domain, etc.)
+        - Creates a backup with _vertex_backup suffix
+
+        This keeps Google output columns identical to OpenAI output.
+
+        Args:
+            csv_path: Path to the detail CSV file
+            url_column: Column containing citation URLs
+            domain_column: Column containing domain values
+            backup_suffix: Suffix for the backup file
+
+        Returns:
+            Path to the updated CSV, or None if failed
+        """
+        csv_path = Path(csv_path)
+
+        if not csv_path.exists():
+            print(f"  Error: File not found: {csv_path}")
+            return None
+
+        # Reset stats for this file
+        self.stats = {"total_urls": 0, "resolved": 0, "failed": 0, "skipped": 0}
+
+        print(f"\nResolving Google redirect URLs...")
+        print(f"  File: {csv_path.name}")
+
+        # Read CSV
+        try:
+            df = pd.read_csv(csv_path)
+        except Exception as e:
+            print(f"  Error reading CSV: {e}")
+            return None
+
+        if url_column not in df.columns:
+            print(f"  No '{url_column}' column found, skipping.")
+            return csv_path
+
+        # Extract unique Vertex URLs
+        vertex_urls = self._extract_vertex_urls(df, url_column)
+        if not vertex_urls:
+            print(f"  No Vertex URLs to resolve.")
+            return csv_path
+
+        print(f"  Found {len(vertex_urls)} unique Vertex redirect URLs")
+        print(f"  Using {self.base_delay_range[0]}-{self.base_delay_range[1]}s delays between requests")
+        print()
+
+        # Resolve URLs
+        url_mapping = self._resolve_urls(vertex_urls)
+
+        # Create backup in a subdirectory to avoid report glob picking it up.
+        # Reports glob *_detail_*.csv in csv_output/ — backups must not match.
+        backup_dir = csv_path.parent / "vertex_backups"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        backup_path = backup_dir / (csv_path.stem + backup_suffix + csv_path.suffix)
+        try:
+            shutil.copy2(csv_path, backup_path)
+            print(f"\n  Backup saved: vertex_backups/{backup_path.name}")
+        except Exception as e:
+            print(f"  Warning: Could not create backup: {e}")
+
+        # Apply mapping: update citation_url and domain, no extra columns
+        df_updated = df.copy()
+        resolved_count = 0
+        fallback_count = 0
+
+        for idx, row in df_updated.iterrows():
+            url = row[url_column]
+            if pd.isna(url) or not isinstance(url, str):
+                continue
+
+            if url in url_mapping:
+                info = url_mapping[url]
+                if info["resolved_url"]:
+                    df_updated.at[idx, url_column] = info["resolved_url"]
+                    df_updated.at[idx, domain_column] = info["domain"]
+                    resolved_count += 1
+                elif info["domain"]:
+                    # Resolution failed but we have a domain from the existing data
+                    # Keep the existing domain (already set correctly by batch_runner)
+                    # Clear the Vertex URL since it's not useful
+                    df_updated.at[idx, url_column] = None
+                    fallback_count += 1
+
+        # Overwrite original file
+        try:
+            df_updated.to_csv(csv_path, index=False)
+        except Exception as e:
+            print(f"  Error saving CSV: {e}")
+            return None
+
+        print(f"\n  Resolution complete: {self.stats['resolved']} resolved, {self.stats['failed']} failed")
+        if fallback_count > 0:
+            print(f"  {fallback_count} rows using domain fallback (URL cleared)")
+        print(f"  Updated: {csv_path.name}")
+
+        return csv_path
+
     def _extract_vertex_urls(self, df: pd.DataFrame, url_column: str) -> List[str]:
         """Extract unique Vertex redirect URLs from the DataFrame."""
         urls = df[url_column].dropna().unique()

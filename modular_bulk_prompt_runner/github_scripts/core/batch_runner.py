@@ -22,6 +22,7 @@ import pandas as pd
 
 from .base_cartridge import BaseCartridge
 from .citation import Citation, SearchResponse, ChatResponse
+from .google_url_resolver import GoogleURLResolver
 
 
 class BatchRunner:
@@ -314,8 +315,11 @@ Generate only the follow-up question, nothing else."""
 
                     # Log each citation
                     if reporter:
-                        parsed = urlparse(cite.url) if cite.url else None
-                        domain = parsed.netloc.replace("www.", "") if parsed and parsed.netloc else None
+                        if cite.domain:
+                            domain = cite.domain
+                        else:
+                            parsed = urlparse(cite.url) if cite.url else None
+                            domain = parsed.netloc.replace("www.", "") if parsed and parsed.netloc else None
                         location = params.get('location', {})
                         reporter.add_detail_row(
                             unit_id=turn_id,
@@ -472,6 +476,10 @@ Generate only the follow-up question, nothing else."""
                 )
                 results.append(result)
 
+        # Auto-resolve Google Vertex redirect URLs
+        if self.search_cartridge.name == "Google":
+            self._resolve_google_urls(results)
+
         return {
             "results": results,
             "total_runs": len(results),
@@ -479,6 +487,40 @@ Generate only the follow-up question, nothing else."""
             "failed": sum(1 for r in results if not r.get('success')),
             "total_citations": sum(r.get('total_citations', 0) for r in results),
         }
+
+    def _resolve_google_urls(self, results: List[Dict[str, Any]]) -> None:
+        """Resolve Vertex redirect URLs in detail CSVs after a Google batch.
+
+        Collects all detail CSV paths from batch results and runs the
+        GoogleURLResolver on each to replace Vertex URLs with actual
+        page URLs in place.
+
+        Args:
+            results: List of result dicts from execute_single_run()
+        """
+        detail_paths = []
+        for r in results:
+            path = r.get("detail_path")
+            if path and Path(path).exists():
+                detail_paths.append(Path(path))
+
+        if not detail_paths:
+            return
+
+        resolver = GoogleURLResolver()
+
+        # Collect unique Vertex URLs across all CSVs first to avoid
+        # resolving the same URL multiple times
+        print(f"\n{'='*60}")
+        print(f"Post-processing: Resolving Google redirect URLs")
+        print(f"{'='*60}")
+        print(f"  {len(detail_paths)} detail CSV(s) to process")
+
+        for path in detail_paths:
+            resolver.resolve_csv_in_place(path)
+
+        print(f"\nURL resolution complete. Output files ready for reports.")
+        print(f"{'='*60}\n")
 
     def stop(self):
         """Request stop of current batch execution."""
